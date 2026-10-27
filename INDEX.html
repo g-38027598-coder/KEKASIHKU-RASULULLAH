@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grab and Throw - Knowledge Arena (Pendidikan Islam Tahun 2)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MediaPipe Hands CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap');
+        
+        body {
+            font-family: 'Fredoka', cursive, sans-serif;
+            background-color: #0f172a;
+            color: #ffffff;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* Mirror video preview */
+        #webcam-video {
+            transform: scaleX(-1);
+        }
+
+        /* Canvas visual layering */
+        #game-canvas {
+            transform: scaleX(-1);
+        }
+
+        .text-shadow-lg {
+            text-shadow: 3px 3px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000;
+        }
+
+        .pulse-glow {
+            animation: pulseGlow 1.5s infinite alternate;
+        }
+
+        @keyframes pulseGlow {
+            0% { box-shadow: 0 0 15px rgba(234, 179, 8, 0.4); }
+            100% { box-shadow: 0 0 30px rgba(234, 179, 8, 0.9); }
+        }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col justify-center items-center relative bg-slate-900">
+
+    <!-- Webcam Video Tag (Hidden off-screen or rendered behind canvas) -->
+    <video id="webcam-video" class="absolute w-full h-full object-cover opacity-20 pointer-events-none" autoplay playsinline muted></video>
+
+    <!-- Main Rendering Canvas -->
+    <canvas id="game-canvas" class="absolute inset-0 w-full h-full z-10"></canvas>
+
+    <!-- Overlay UI Layer (HUD, Start Screen, Game Over Screen) -->
+    <div id="ui-layer" class="absolute inset-0 z-20 flex flex-col justify-between p-4 md:p-6 pointer-events-none">
+        
+        <!-- Top HUD -->
+        <div id="hud" class="flex justify-between items-center w-full max-w-5xl mx-auto opacity-0 transition-opacity duration-500">
+            <!-- Score & Question Counter -->
+            <div class="bg-slate-800/80 backdrop-blur border-2 border-amber-400 rounded-2xl p-3 px-5 shadow-xl">
+                <div class="text-xs text-amber-400 font-bold uppercase tracking-wider">Skor</div>
+                <div id="score-txt" class="text-3xl font-extrabold text-yellow-300">0</div>
+            </div>
+
+            <!-- Question Progress -->
+            <div class="bg-slate-800/80 backdrop-blur border-2 border-indigo-500 rounded-2xl p-3 px-6 text-center shadow-xl">
+                <div class="text-xs text-indigo-300 font-bold uppercase tracking-wider">Soalan</div>
+                <div id="question-num" class="text-2xl font-bold text-white">1 / 10</div>
+            </div>
+
+            <!-- Timer & Hearts -->
+            <div class="flex gap-4 items-center">
+                <div class="bg-slate-800/80 backdrop-blur border-2 border-cyan-400 rounded-2xl p-3 px-5 text-center shadow-xl">
+                    <div class="text-xs text-cyan-300 font-bold uppercase tracking-wider">Masa</div>
+                    <div id="timer-txt" class="text-3xl font-extrabold text-cyan-200">20s</div>
+                </div>
+                <div class="bg-slate-800/80 backdrop-blur border-2 border-rose-500 rounded-2xl p-3 px-5 text-center shadow-xl">
+                    <div class="text-xs text-rose-400 font-bold uppercase tracking-wider">Nyawa</div>
+                    <div id="lives-txt" class="text-2xl flex gap-1 mt-1 text-rose-500">❤️❤️❤️</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Question Banner (Center Top during Game) -->
+        <div id="question-box" class="w-full max-w-3xl mx-auto my-auto opacity-0 transition-all duration-500 transform translate-y-[-20px] pointer-events-none">
+            <div class="bg-gradient-to-r from-indigo-900/90 via-purple-900/90 to-indigo-900/90 border-4 border-yellow-400 rounded-3xl p-6 shadow-2xl text-center backdrop-blur">
+                <div class="text-sm font-bold text-yellow-300 uppercase mb-1">Tajuk: Kekasihku Rasulullah SAW (Pendidikan Islam Tahun 2)</div>
+                <h2 id="question-text" class="text-2xl md:text-3xl font-extrabold text-white leading-tight drop-shadow-md">
+                    Sila tunggu...
+                </h2>
+            </div>
+        </div>
+
+        <!-- Target Zone Indicator Label -->
+        <div id="target-hint" class="text-center opacity-0 transition-opacity duration-500 mb-2">
+            <span class="bg-rose-600/90 text-white font-bold px-6 py-2 rounded-full text-lg shadow-lg border-2 border-white animate-bounce inline-block">
+                🎯 KEPIT (PINCH) BOLA JAWAPAN & BALING KE KAWASAN SASARAN DINGDING! 🎯
+            </span>
+        </div>
+    </div>
+
+    <!-- Start / Splash Screen Modal -->
+    <div id="start-modal" class="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4">
+        <div class="max-w-2xl w-full bg-slate-900 border-4 border-amber-400 rounded-3xl p-6 md:p-8 text-center shadow-2xl flex flex-col items-center">
+            <div class="w-20 h-20 bg-amber-400 text-slate-900 rounded-full flex items-center justify-center text-4xl mb-4 shadow-lg pulse-glow">
+                🎯
+            </div>
+            <h1 class="text-3xl md:text-4xl font-extrabold text-amber-400 mb-2 tracking-wide text-shadow-lg">
+                GRAB AND THROW: KNOWLEDGE ARENA
+            </h1>
+            <p class="text-lg text-slate-300 mb-6 font-medium">
+                Pendidikan Islam Tahun 2 — <span class="text-yellow-300">Sirah: Kekasihku Rasulullah SAW</span>
+            </p>
+
+            <!-- Instructions -->
+            <div class="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 w-full text-left mb-6 text-sm text-slate-200 space-y-2">
+                <div class="font-bold text-amber-400 text-base mb-1">Cara Bermain (Hand Gesture):</div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xl">👌</span>
+                    <span><b>Kepit (Pinch):</b> Temukan <b>Ibu Jari</b> & <b>Jari Telunjuk</b> di atas bola jawapan untuk memegang/mengambil bola.</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xl">🤚</span>
+                    <span><b>Baling (Throw):</b> Gerakkan tangan ke kawasan Sasaran Target (Atas Canvas) dan <b>lepaskan kepitan</b> untuk membaling bola jawapan!</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-xl">⏱️</span>
+                    <span>Anda ada <b>20 saat</b> untuk setiap soalan & <b>3 Nyawa</b>!</span>
+                </div>
+            </div>
+
+            <!-- Permission & Start Button -->
+            <button id="start-btn" onclick="initGame()" class="w-full max-w-md bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-extrabold text-xl py-4 px-8 rounded-2xl shadow-xl transform transition hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer border-2 border-white">
+                MULA MAIN (BENARKAN WEBCAM)
+            </button>
+            <div id="loading-status" class="hidden text-amber-400 mt-4 text-sm font-semibold animate-pulse">
+                Memuatkan Model Kamera & MediaPipe Hands... Sila Tunggu.
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over / Victory Modal -->
+    <div id="gameover-modal" class="hidden absolute inset-0 z-30 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4">
+        <div class="max-w-md w-full bg-slate-900 border-4 border-indigo-500 rounded-3xl p-6 md:p-8 text-center shadow-2xl flex flex-col items-center">
+            <div id="gameover-icon" class="text-6xl mb-3">🏆</div>
+            <h2 id="gameover-title" class="text-3xl font-extrabold text-yellow-400 mb-2">TAHNIAH!</h2>
+            <p id="gameover-desc" class="text-slate-300 mb-6">Anda telah menyelesaikan cabaran Knowledge Arena!</p>
+            
+            <div class="bg-slate-800 rounded-2xl p-4 w-full mb-6 border border-slate-700">
+                <div class="text-slate-400 text-sm font-bold uppercase">Skor Akhir</div>
+                <div id="final-score" class="text-5xl font-black text-amber-400 my-1">0</div>
+            </div>
+
+            <button onclick="restartGame()" class="w-full bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-extrabold text-xl py-3 px-6 rounded-2xl shadow-lg transform transition hover:scale-105 active:scale-95 pointer-events-auto cursor-pointer border-2 border-white">
+                MAIN SEMULA 🔄
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Game Logic Script -->
+    <script>
+        // -------------------------------------------------------------
+        // 1. DATA SOALAN (Pendidikan Islam Tahun 2: Kekasihku Rasulullah)
+        // -------------------------------------------------------------
+        const questionsData = [
+            {
+                q: "Siapakah nama bapa kepada Nabi Muhammad SAW?",
+                answers: ["Abdullah bin Abdul Muttalib", "Abu Talib", "Hamzah bin Abdul Muttalib"],
+                correct: 0
+            },
+            {
+                q: "Siapakah nama ibu kepada Nabi Muhammad SAW?",
+                answers: ["Siti Khadijah", "Aaminah binti Wahab", "Siti Fatimah"],
+                correct: 1
+            },
+            {
+                q: "Di manakah tempat lahir Nabi Muhammad SAW?",
+                answers: ["Madinah Al-Munawwarah", "Taif", "Makkah Al-Mukarramah"],
+                correct: 2
+            },
+            {
+                q: "Siapakah nama datuk Nabi Muhammad SAW yang memelihara baginda selepas ibunya wafat?",
+                answers: ["Abdul Muttalib", "Abu Lahab", "Abbas"],
+                correct: 0
+            },
+            {
+                q: "Apakah gelaran yang diberi kepada Nabi Muhammad SAW kerana bersifat jujur?",
+                answers: ["Al-Amin", "As-Siddiq", "Al-Faruq"],
+                correct: 0
+            },
+            {
+                q: "Siapakah nama ibu susuan pertama/pengasuh awal Nabi Muhammad SAW?",
+                answers: ["Halimatus Sa'diyyah", "Thuwaibah", "Ummu Aiman"],
+                correct: 0
+            },
+            {
+                q: "Nabi Muhammad SAW berasal daripada keturunan kaum apa?",
+                answers: ["Quraisy", "Tamim", "Khazraj"],
+                correct: 0
+            },
+            {
+                q: "Apakah pekerjaan Nabi Muhammad SAW semasa membimbing pemuda bersama bapa saudaranya?",
+                answers: ["Petani", "Pengembala Kambing", "Nelayan"],
+                correct: 1
+            },
+            {
+                q: "Bapa saudara yang sangat menyayangi dan mempertahankan Nabi Muhammad SAW ialah...",
+                answers: ["Abu Lahab", "Abu Jahal", "Abu Talib"],
+                correct: 2
+            },
+            {
+                q: "Nabi Muhammad SAW diutuskan oleh Allah SWT sebagai rahmat untuk...",
+                answers: ["Sekeluarga sahaja", "Makkah sahaja", "Sekeluar Alam (Seluruh Alam)"],
+                correct: 2
+            }
+        ];
+
+        // -------------------------------------------------------------
+        // 2. AUDIO SYNTHESIZER (HTML5 Web Audio API)
+        // -------------------------------------------------------------
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playGrab() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(600, this.ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            }
+
+            playThrow() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(150, this.ctx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.2);
+            }
+
+            playCorrect() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
+                osc.frequency.setValueAtTime(783.99, now + 0.2); // G5
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.35);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.35);
+            }
+
+            playWrong() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, now);
+                osc.frequency.setValueAtTime(130, now + 0.15);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.3);
+            }
+        }
+
+        const audio = new SoundFX();
+
+        // -------------------------------------------------------------
+        // 3. GAME STATE & VARIABLES
+        // -------------------------------------------------------------
+        let canvas, ctx;
+        let videoElement;
+        let hands;
+        let camera;
+
+        let currentQuestionIdx = 0;
+        let score = 0;
+        let lives = 3;
+        let timer = 20;
+        let timerInterval = null;
+        let isGameRunning = false;
+
+        // Hand Gesture Tracking State
+        let handPinchPos = { x: 0, y: 0 };
+        let isPinched = false;
+        let grabbedBall = null;
+
+        // Answer Balls & Target Objects
+        let answerBalls = [];
+        let targetArea = { x: 0, y: 0, width: 0, height: 0 };
+
+        // Visual Particles & Slashes
+        let particles = [];
+        let slashTrails = [];
+
+        // Colors Palette for Balls
+        const ballColors = [
+            { bg: '#38bdf8', border: '#0284c7', text: '#0f172a' }, // Cyan
+            { bg: '#a855f7', border: '#7e22ce', text: '#ffffff' }, // Purple
+            { bg: '#f43f5e', border: '#be123c', text: '#ffffff' }  // Rose
+        ];
+
+        // -------------------------------------------------------------
+        // 4. INITIALIZATION & MEDIAPIPE SETUP
+        // -------------------------------------------------------------
+        window.onload = () => {
+            canvas = document.getElementById('game-canvas');
+            ctx = canvas.getContext('2d');
+            videoElement = document.getElementById('webcam-video');
+
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+        };
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            // Target area at top center
+            targetArea = {
+                x: canvas.width * 0.25,
+                y: canvas.height * 0.18,
+                width: canvas.width * 0.5,
+                height: canvas.height * 0.15
+            };
+
+            if (isGameRunning && answerBalls.length > 0) {
+                repositionBalls();
+            }
+        }
+
+        async function initGame() {
+            audio.init();
+            document.getElementById('start-btn').classList.add('hidden');
+            document.getElementById('loading-status').classList.remove('hidden');
+
+            // Setup MediaPipe Hands
+            hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.6,
+                minTrackingConfidence: 0.6
+            });
+
+            hands.onResults(onHandResults);
+
+            // Setup Camera
+            camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({ image: videoElement });
+                },
+                width: 1280,
+                height: 720
+            });
+
+            try {
+                await camera.start();
+                document.getElementById('start-modal').classList.add('hidden');
+                
+                // Show HUD & Question Box
+                document.getElementById('hud').classList.remove('opacity-0');
+                document.getElementById('question-box').classList.remove('opacity-0');
+                document.getElementById('target-hint').classList.remove('opacity-0');
+
+                // Start Game Loop
+                currentQuestionIdx = 0;
+                score = 0;
+                lives = 3;
+                isGameRunning = true;
+
+                updateHUD();
+                loadQuestion(currentQuestionIdx);
+                requestAnimationFrame(gameLoop);
+            } catch (err) {
+                alert("Ralat mengakses Webcam: " + err.message + "\nSila benarkan akses kamera untuk bermain.");
+                document.getElementById('loading-status').classList.add('hidden');
+                document.getElementById('start-btn').classList.remove('hidden');
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 5. MEDIAPIPE HAND TRACKING & PINCH DETECTION
+        // -------------------------------------------------------------
+        function onHandResults(results) {
+            if (!isGameRunning) return;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+
+                // Thumb Tip (4) and Index Finger Tip (8)
+                const thumbTip = landmarks[4];
+                const indexTip = landmarks[8];
+
+                // Calculate positions scaled to canvas (x mirrored for camera)
+                const thumbX = thumbTip.x * canvas.width;
+                const thumbY = thumbTip.y * canvas.height;
+                const indexX = indexTip.x * canvas.width;
+                const indexY = indexTip.y * canvas.height;
+
+                // Midpoint for pinch center
+                const midX = (thumbX + indexX) / 2;
+                const midY = (thumbY + indexY) / 2;
+
+                // Distance between thumb and index
+                const dist = Math.hypot(thumbX - indexX, thumbY - indexY);
+
+                // Pinch Threshold
+                const pinchThreshold = 45;
+                const newIsPinched = dist < pinchThreshold;
+
+                handPinchPos = { x: midX, y: midY };
+
+                // Trail Effect for hand movement
+                slashTrails.push({ x: midX, y: midY, alpha: 1.0, isPinch: newIsPinched });
+                if (slashTrails.length > 15) slashTrails.shift();
+
+                // Pinch & Grab Logic
+                if (newIsPinched) {
+                    if (!isPinched) {
+                        // Pinch Started -> Check if grabbing a ball
+                        audio.playGrab();
+                        checkGrabBall(midX, midY);
+                    } else if (grabbedBall) {
+                        // Dragging Ball
+                        grabbedBall.x = midX;
+                        grabbedBall.y = midY;
+                        grabbedBall.vx = 0;
+                        grabbedBall.vy = 0;
+                    }
+                } else {
+                    if (isPinched && grabbedBall) {
+                        // Pinch Released -> Throw Ball
+                        throwBall(grabbedBall);
+                        grabbedBall = null;
+                    }
+                }
+
+                isPinched = newIsPinched;
+            } else {
+                isPinched = false;
+                grabbedBall = null;
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 6. GAME MECHANICS (GRAB, THROW, COLLISION, TIMER)
+        // -------------------------------------------------------------
+        function checkGrabBall(px, py) {
+            for (let ball of answerBalls) {
+                const d = Math.hypot(ball.x - px, ball.y - py);
+                if (d < ball.radius * 1.3) {
+                    grabbedBall = ball;
+                    ball.isGrabbed = true;
+                    createParticles(ball.x, ball.y, ball.color.bg, 10);
+                    break;
+                }
+            }
+        }
+
+        function throwBall(ball) {
+            audio.playThrow();
+            ball.isGrabbed = false;
+
+            // Check if released inside or near Target Area
+            if (ball.x >= targetArea.x && ball.x <= targetArea.x + targetArea.width &&
+                ball.y >= targetArea.y && ball.y <= targetArea.y + targetArea.height + 50) {
+                
+                checkAnswer(ball);
+            } else {
+                // Return ball to home position if missed target
+                ball.x = ball.homeX;
+                ball.y = ball.homeY;
+            }
+        }
+
+        function loadQuestion(idx) {
+            if (idx >= questionsData.length) {
+                endGame(true);
+                return;
+            }
+
+            const qData = questionsData[idx];
+            document.getElementById('question-text').innerText = qData.q;
+            document.getElementById('question-num').innerText = `${idx + 1} / ${questionsData.length}`;
+
+            // Reset Timer
+            resetTimer();
+
+            // Setup Balls
+            answerBalls = [];
+            const count = qData.answers.length;
+            const spacing = canvas.width / (count + 1);
+
+            for (let i = 0; i < count; i++) {
+                const posX = spacing * (i + 1);
+                const posY = canvas.height * 0.78;
+                answerBalls.push({
+                    id: i,
+                    text: qData.answers[i],
+                    x: posX,
+                    y: posY,
+                    homeX: posX,
+                    homeY: posY,
+                    radius: Math.min(canvas.width * 0.08, 65),
+                    color: ballColors[i % ballColors.length],
+                    isGrabbed: false,
+                    isCorrect: (i === qData.correct)
+                });
+            }
+        }
+
+        function repositionBalls() {
+            const count = answerBalls.length;
+            const spacing = canvas.width / (count + 1);
+            answerBalls.forEach((ball, i) => {
+                ball.homeX = spacing * (i + 1);
+                ball.homeY = canvas.height * 0.78;
+                if (!ball.isGrabbed) {
+                    ball.x = ball.homeX;
+                    ball.y = ball.homeY;
+                }
+                ball.radius = Math.min(canvas.width * 0.08, 65);
+            });
+        }
+
+        function checkAnswer(ball) {
+            if (ball.isCorrect) {
+                // Correct Answer
+                audio.playCorrect();
+                score += 100 + timer * 5; // Extra bonus for speed
+                createParticles(ball.x, ball.y, '#22c55e', 35);
+                updateHUD();
+
+                nextQuestion();
+            } else {
+                // Wrong Answer
+                audio.playWrong();
+                lives--;
+                createParticles(ball.x, ball.y, '#ef4444', 35);
+                updateHUD();
+
+                if (lives <= 0) {
+                    endGame(false);
+                } else {
+                    // Reset ball position
+                    ball.x = ball.homeX;
+                    ball.y = ball.homeY;
+                }
+            }
+        }
+
+        function nextQuestion() {
+            currentQuestionIdx++;
+            if (currentQuestionIdx < questionsData.length) {
+                loadQuestion(currentQuestionIdx);
+            } else {
+                endGame(true);
+            }
+        }
+
+        function resetTimer() {
+            clearInterval(timerInterval);
+            timer = 20;
+            document.getElementById('timer-txt').innerText = `${timer}s`;
+
+            timerInterval = setInterval(() => {
+                if (!isGameRunning) return;
+                timer--;
+                document.getElementById('timer-txt').innerText = `${timer}s`;
+
+                if (timer <= 0) {
+                    audio.playWrong();
+                    lives--;
+                    updateHUD();
+                    if (lives <= 0) {
+                        endGame(false);
+                    } else {
+                        nextQuestion();
+                    }
+                }
+            }, 1000);
+        }
+
+        function updateHUD() {
+            document.getElementById('score-txt').innerText = score;
+            let heartsStr = '';
+            for (let i = 0; i < lives; i++) heartsStr += '❤️';
+            document.getElementById('lives-txt').innerText = heartsStr || '💀';
+        }
+
+        function endGame(isWin) {
+            isGameRunning = false;
+            clearInterval(timerInterval);
+
+            const modal = document.getElementById('gameover-modal');
+            const title = document.getElementById('gameover-title');
+            const desc = document.getElementById('gameover-desc');
+            const icon = document.getElementById('gameover-icon');
+            const finalScore = document.getElementById('final-score');
+
+            finalScore.innerText = score;
+
+            if (isWin) {
+                icon.innerText = '🏆';
+                title.innerText = 'TAHNIAH! ANDA MENANG!';
+                title.className = 'text-3xl font-extrabold text-yellow-400 mb-2';
+                desc.innerText = 'Sangat hebat! Anda memahami tajuk Kekasihku Rasulullah SAW.';
+            } else {
+                icon.innerText = '💥';
+                title.innerText = 'GAME OVER!';
+                title.className = 'text-3xl font-extrabold text-rose-500 mb-2';
+                desc.innerText = 'Jangan putus asa! Cuba lagi untuk menguasai soalan.';
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function restartGame() {
+            document.getElementById('gameover-modal').classList.add('hidden');
+            currentQuestionIdx = 0;
+            score = 0;
+            lives = 3;
+            isGameRunning = true;
+
+            updateHUD();
+            loadQuestion(currentQuestionIdx);
+            requestAnimationFrame(gameLoop);
+        }
+
+        // -------------------------------------------------------------
+        // 7. CANVAS VISUAL RENDERING & ANIMATIONS
+        // -------------------------------------------------------------
+        function createParticles(x, y, color, amount) {
+            for (let i = 0; i < amount; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 12,
+                    vy: (Math.random() - 0.5) * 12,
+                    radius: Math.random() * 6 + 2,
+                    color: color,
+                    alpha: 1.0,
+                    life: Math.random() * 20 + 20
+                });
+            }
+        }
+
+        function drawParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.alpha -= 1 / p.life;
+
+                if (p.alpha <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+
+                ctx.save();
+                ctx.globalAlpha = p.alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function drawSlashTrails() {
+            if (slashTrails.length < 2) return;
+
+            for (let i = 0; i < slashTrails.length - 1; i++) {
+                const p1 = slashTrails[i];
+                const p2 = slashTrails[i + 1];
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.strokeStyle = p1.isPinch ? '#facc15' : '#38bdf8';
+                ctx.lineWidth = p1.isPinch ? 8 : 4;
+                ctx.lineCap = 'round';
+                ctx.shadowColor = p1.isPinch ? '#eab308' : '#0284c7';
+                ctx.shadowBlur = 10;
+                ctx.globalAlpha = (i / slashTrails.length);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        function drawTargetArea() {
+            ctx.save();
+            // Pulsing target border glow
+            const pulse = Math.sin(Date.now() * 0.005) * 5;
+            
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+            ctx.strokeStyle = '#f43f5e';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([12, 8]);
+
+            // Rounded rectangle for target
+            const rx = targetArea.x;
+            const ry = targetArea.y;
+            const rw = targetArea.width;
+            const rh = targetArea.height;
+            const radius = 20;
+
+            ctx.beginPath();
+            ctx.roundRect(rx - pulse, ry - pulse, rw + pulse * 2, rh + pulse * 2, radius);
+            ctx.fill();
+            ctx.stroke();
+
+            // Target Text
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#fecdd3';
+            ctx.font = 'bold 22px Fredoka, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur = 4;
+            ctx.fillText("🎯 BALING JAWAPAN KE SINI 🎯", rx + rw / 2, ry + rh / 2);
+
+            ctx.restore();
+        }
+
+        function drawAnswerBalls() {
+            answerBalls.forEach(ball => {
+                ctx.save();
+
+                // Ball Glow when grabbed
+                if (ball.isGrabbed) {
+                    ctx.shadowColor = ball.color.bg;
+                    ctx.shadowBlur = 25;
+                } else {
+                    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+                    ctx.shadowBlur = 10;
+                }
+
+                // Outer Circle (Border)
+                ctx.beginPath();
+                ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+                ctx.fillStyle = ball.color.bg;
+                ctx.fill();
+                ctx.lineWidth = 5;
+                ctx.strokeStyle = ball.color.border;
+                ctx.stroke();
+
+                // Shiny Highlight
+                ctx.beginPath();
+                ctx.arc(ball.x - ball.radius * 0.3, ball.y - ball.radius * 0.3, ball.radius * 0.25, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.fill();
+
+                // Ball Text (Answer wrapping)
+                ctx.fillStyle = ball.color.text;
+                ctx.font = 'bold 16px Fredoka, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                // Wrap text if needed
+                const words = ball.text.split(' ');
+                if (words.length > 2) {
+                    const mid = Math.ceil(words.length / 2);
+                    const line1 = words.slice(0, mid).join(' ');
+                    const line2 = words.slice(mid).join(' ');
+                    ctx.fillText(line1, ball.x, ball.y - 10);
+                    ctx.fillText(line2, ball.x, ball.y + 12);
+                } else {
+                    ctx.fillText(ball.text, ball.x, ball.y);
+                }
+
+                ctx.restore();
+            });
+        }
+
+        function drawHandCursor() {
+            if (slashTrails.length === 0) return;
+
+            ctx.save();
+            const pos = handPinchPos;
+
+            // Outer Pinch Indicator Circle
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, isPinched ? 18 : 28, 0, Math.PI * 2);
+            ctx.fillStyle = isPinched ? 'rgba(234, 179, 8, 0.6)' : 'rgba(56, 189, 248, 0.4)';
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = isPinched ? '#facc15' : '#ffffff';
+            ctx.stroke();
+
+            // Center Pinch Dot
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
+            ctx.fillStyle = isPinched ? '#ffffff' : '#0284c7';
+            ctx.fill();
+
+            // Icon / Label
+            ctx.font = '18px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(isPinched ? '👌' : '✋', pos.x, pos.y - 35);
+
+            ctx.restore();
+        }
+
+        // Main Animation Loop
+        function gameLoop() {
+            if (!isGameRunning) return;
+
+            // Clear Canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Render Layers
+            drawTargetArea();
+            drawAnswerBalls();
+            drawParticles();
+            drawSlashTrails();
+            drawHandCursor();
+
+            requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+</html>
